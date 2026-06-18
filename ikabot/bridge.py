@@ -21,7 +21,7 @@ import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 class _MissingRequestsTimeout(Exception):
     pass
@@ -78,7 +78,7 @@ class BridgeError(Exception):
 class BridgeState:
     def __init__(self, token: str):
         self.token = token
-        self.started_at = _datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        self.started_at = _datetime.datetime.now(_datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         self.session: Optional[Session] = None
         self.session_error: Optional[str] = None
         self.session_traceback: Optional[str] = None
@@ -151,6 +151,17 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             if method == "POST" and path == "/request":
                 self._handle_request_endpoint()
                 return
+
+            if method == "GET":
+                city_id = _typed_resource_id(path, "city")
+                if city_id is not None:
+                    self._handle_city_endpoint(city_id)
+                    return
+
+                island_id = _typed_resource_id(path, "island")
+                if island_id is not None:
+                    self._handle_island_endpoint(island_id)
+                    return
 
             raise BridgeError(404, "not_found", "Route not found")
         except BridgeError as exc:
@@ -247,6 +258,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _handle_city_endpoint(self, city_id: str) -> None:
+        from ikabot.helpers.getJson import getCity
+
+        session = self.state.require_session()
+        path = f"view=city&cityId={city_id}&backgroundView=city&currentCityId={city_id}&ajax=1"
+        with self.state.request_lock:
+            html = session.get(path)
+            data = _parse_upstream_json(lambda: getCity(html), "city", city_id)
+
+        self._send_json(200, {"ok": True, "data": _json_safe(data)})
+
+    def _handle_island_endpoint(self, island_id: str) -> None:
+        from ikabot.helpers.getJson import getIsland
+
+        session = self.state.require_session()
+        path = f"view=island&islandId={island_id}&backgroundView=island&currentIslandId={island_id}&ajax=1"
+        with self.state.request_lock:
+            html = session.get(path)
+            data = _parse_upstream_json(lambda: getIsland(html), "island", island_id)
+
+        self._send_json(200, {"ok": True, "data": _json_safe(data)})
+
     def _require_auth(self) -> None:
         auth = self.headers.get("Authorization", "")
         prefix = "Bearer "
@@ -318,6 +351,39 @@ class BridgeHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address: Tuple[str, int], handler_class: type, state: BridgeState):
         self.state = state
         super().__init__(server_address, handler_class)
+
+
+def _typed_resource_id(path: str, resource: str) -> Optional[str]:
+    match = re.fullmatch(rf"/{resource}/([^/]+)", path)
+    if not match:
+        return None
+
+    resource_id = unquote(match.group(1))
+    if not resource_id or not re.fullmatch(r"\d+", resource_id):
+        raise BridgeError(400, "invalid_request", f"{resource} id must be numeric")
+    return resource_id
+
+
+def _parse_upstream_json(fn: Any, resource: str, resource_id: str) -> Any:
+    try:
+        return fn()
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise BridgeError(
+            422,
+            "upstream_parse_failed",
+            f"Could not parse {resource} data from Ikariam response",
+            {"resource": resource, "id": resource_id, "type": exc.__class__.__name__},
+        )
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _normalize_request_body(body: Dict[str, Any]) -> Dict[str, Any]:
