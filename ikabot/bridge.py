@@ -101,8 +101,11 @@ class BridgeState:
 
             login_email = os.environ.get("IKABOT_LOGIN_EMAIL")
             login_password = os.environ.get("IKABOT_LOGIN_PASSWORD")
+            account_index = os.environ.get("IKABOT_ACCOUNT_INDEX")
             if login_email and login_password:
                 ikabot_config.predetermined_input = [login_email, login_password]
+                if account_index:
+                    ikabot_config.predetermined_input.append(int(account_index))
 
             self.session = Session()
         except BaseException as exc:  # Session may call sys.exit(), which raises SystemExit.
