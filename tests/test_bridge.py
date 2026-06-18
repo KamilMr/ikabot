@@ -107,7 +107,7 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(response["data"]["name"], "Capital")
             self.assertEqual(
                 session.paths,
-                ["view=city&cityId=12345&backgroundView=city&currentCityId=12345&ajax=1"],
+                ["view=city&cityId=12345"],
             )
         finally:
             get_json.getCity = original_get_city

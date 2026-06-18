@@ -271,12 +271,24 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         from ikabot.helpers.getJson import getCity
 
         session = self.state.require_session()
-        path = f"view=city&cityId={city_id}&backgroundView=city&currentCityId={city_id}&ajax=1"
+        paths = [
+            f"view=city&cityId={city_id}",
+            f"view=city&cityId={city_id}&backgroundView=city&currentCityId={city_id}&ajax=1",
+        ]
+        last_error: Optional[BridgeError] = None
         with self.state.request_lock:
-            html = session.get(path)
-            data = _parse_upstream_json(lambda: getCity(html), "city", city_id)
+            for path in paths:
+                html = session.get(path)
+                try:
+                    data = _parse_upstream_json(lambda: getCity(html), "city", city_id)
+                    self._send_json(200, {"ok": True, "data": _json_safe(data)})
+                    return
+                except BridgeError as exc:
+                    last_error = exc
 
-        self._send_json(200, {"ok": True, "data": _json_safe(data)})
+        if last_error is not None:
+            raise last_error
+        raise BridgeError(422, "upstream_parse_failed", "Could not parse city data from Ikariam response", {"resource": "city", "id": city_id})
 
     def _handle_island_endpoint(self, island_id: str) -> None:
         from ikabot.helpers.getJson import getIsland
