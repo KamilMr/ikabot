@@ -41,7 +41,7 @@ except ImportError:  # Allows bridge validation tests to run before dependencies
     REQUEST_TIMEOUT_EXC = _MissingRequestsTimeout
     REQUEST_EXCEPTION_EXC = _MissingRequestsException
 
-from ikabot.config import actionRequest
+from ikabot.config import actionRequest, ikaFile
 
 BRIDGE_VERSION = 1
 DEFAULT_HOST = "127.0.0.1"
@@ -526,6 +526,23 @@ def _validate_bind_host(host: str) -> None:
         raise SystemExit("The bridge may only bind to localhost (127.0.0.1, ::1, or localhost)")
 
 
+def _prepare_session_storage() -> None:
+    """Use the same .ikabot storage location as the classic CLI.
+
+    The classic ikabot command changes into the user's home directory before
+    creating Session(), so saved cookies live in ~/.ikabot. The bridge must do
+    the same or it starts with an empty project-local .ikabot file and appears
+    unauthenticated while the classic CLI is logged in.
+    """
+    home_key = "USERPROFILE" if os.name == "nt" else "HOME"
+    home = os.getenv(home_key)
+    if home:
+        os.chdir(home)
+    if not os.path.isfile(ikaFile):
+        open(ikaFile, "w").close()
+        os.chmod(ikaFile, 0o600)
+
+
 def run(argv: Optional[list] = None) -> None:
     args = _parse_args(argv)
     _validate_bind_host(args.host)
@@ -537,6 +554,7 @@ def run(argv: Optional[list] = None) -> None:
         raise SystemExit("Refusing to bind bridge to a non-loopback address")
 
     print(json.dumps({"event": "bridge-ready", "baseUrl": f"http://{host}:{port}", "token": state.token}), flush=True)
+    _prepare_session_storage()
     state.start_session_thread()
 
     try:
