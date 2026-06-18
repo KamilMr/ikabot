@@ -96,7 +96,13 @@ class BridgeState:
 
     def _create_session(self) -> None:
         try:
+            from ikabot import config as ikabot_config
             from ikabot.web.session import Session
+
+            login_email = os.environ.get("IKABOT_LOGIN_EMAIL")
+            login_password = os.environ.get("IKABOT_LOGIN_PASSWORD")
+            if login_email and login_password:
+                ikabot_config.predetermined_input = [login_email, login_password]
 
             self.session = Session()
         except BaseException as exc:  # Session may call sys.exit(), which raises SystemExit.
